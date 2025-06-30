@@ -1,0 +1,19 @@
+# Python environment
+.venv/
+*.pyc
+__pycache__/
+
+# Environment variables
+.env
+
+# Database files (if using SQLite for local dev)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE specific files
+.vscode/
+.idea/
+
+# macOS specific files
+.DS_Store
