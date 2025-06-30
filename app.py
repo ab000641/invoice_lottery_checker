@@ -1,9 +1,10 @@
 import os
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from dotenv import load_dotenv
+from datetime import datetime
 
 # 加載 .env 檔案中的環境變數
 load_dotenv()
@@ -70,6 +71,67 @@ def health_check():
         return jsonify({"status": "ok", "database": "connected"}), 200
     except Exception as e:
         return jsonify({"status": "error", "database": "disconnected", "details": str(e)}), 500
+    
+@app.route('/invoices', methods=['POST'])
+def add_invoice():
+    data = request.get_json() # 獲取 JSON 格式的請求數據
+
+    if not data:
+        return jsonify({"message": "請求數據無效"}), 400
+
+    # 檢查必要欄位
+    required_fields = ['invoice_number', 'invoice_date', 'total_amount']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"message": f"缺少必要欄位: {field}"}), 400
+
+    # 轉換日期字串為 date 物件
+    try:
+        invoice_date = datetime.strptime(data['invoice_date'], '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"message": "invoice_date 格式不正確，應為 YYYY-MM-DD"}), 400
+
+    # 創建新的 Invoice 物件
+    new_invoice = Invoice(
+        invoice_number=data['invoice_number'],
+        invoice_date=invoice_date,
+        total_amount=data['total_amount'],
+        # winning_status 預設為 False，award_id 預設為 None
+    )
+
+    try:
+        db.session.add(new_invoice)
+        db.session.commit() # 提交到資料庫
+
+        return jsonify({
+            "message": "發票新增成功",
+            "invoice": {
+                "id": new_invoice.id,
+                "invoice_number": new_invoice.invoice_number,
+                "invoice_date": new_invoice.invoice_date.isoformat(), # 將 date 物件轉為 ISO 格式字串
+                "total_amount": new_invoice.total_amount,
+                "winning_status": new_invoice.winning_status
+            }
+        }), 201 # 201 Created 狀態碼
+    except Exception as e:
+        db.session.rollback() # 出錯時回滾事務
+        return jsonify({"message": "新增發票失敗", "error": str(e)}), 500
+
+@app.route('/invoices', methods=['GET'])
+def get_all_invoices():
+    invoices = Invoice.query.all()
+    output = []
+    for invoice in invoices:
+        invoice_data = {
+            "id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date.isoformat(),
+            "total_amount": invoice.total_amount,
+            "winning_status": invoice.winning_status,
+            "award_id": invoice.award_id
+        }
+        output.append(invoice_data)
+    return jsonify({"invoices": output})
 
 # 只有在直接運行此檔案時才執行
 if __name__ == '__main__':
@@ -77,6 +139,5 @@ if __name__ == '__main__':
         # 首次運行時，如果資料庫不存在，則根據模型創建所有資料表
         # 注意：這只會創建表，不會處理表的修改或數據遷移。
         # 在生產環境中，應使用 Alembic 等資料庫遷移工具。
-        db.create_all()
         print("資料庫已初始化 (如果資料表不存在則會創建)。")
     app.run(host='0.0.0.0', port=5000)
