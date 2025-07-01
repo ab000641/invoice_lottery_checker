@@ -1,10 +1,12 @@
 import os
+import requests
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from dotenv import load_dotenv
 from datetime import datetime
+from bs4 import BeautifulSoup
 
 # 加載 .env 檔案中的環境變數
 load_dotenv()
@@ -225,63 +227,6 @@ def delete_invoice(invoice_id):
 
 # --- 獎項 (Award) 相關 API ---
 
-@app.route('/awards', methods=['POST'])
-def add_award():
-    """
-    新增一個獎項。
-    請求範例:
-    {
-        "prize_name": "特別獎",
-        "winning_numbers": "12345678",
-        "award_date": "2024-03-25"
-    }
-    或者：
-    {
-        "prize_name": "頭獎",
-        "winning_numbers": "87654321,11112222",
-        "award_date": "2024-03-25"
-    }
-    """
-    data = request.get_json()
-
-    if not data:
-        return jsonify({"message": "請求數據無效，請提供JSON格式數據"}), 400
-
-    required_fields = ['prize_name', 'winning_numbers', 'award_date']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"message": f"缺少必要欄位: {field}"}), 400
-
-    try:
-        award_date = datetime.strptime(data['award_date'], '%Y-%m-%d').date()
-    except ValueError:
-        return jsonify({"message": "award_date 格式不正確，應為YYYY-MM-DD"}), 400
-
-    # 由於 award_date 不再是 unique，這裡不需要檢查相同開獎日期的獎項重複問題。
-    # 而是應該允許同一開獎日期有多個獎項 (例如特獎、頭獎等)
-
-    new_award = Award(
-        prize_name=data['prize_name'],
-        winning_numbers=data['winning_numbers'],
-        award_date=award_date
-    )
-
-    try:
-        db.session.add(new_award)
-        db.session.commit()
-        return jsonify({
-            "message": "獎項新增成功",
-            "award": {
-                "id": new_award.id,
-                "prize_name": new_award.prize_name,
-                "winning_numbers": new_award.winning_numbers,
-                "award_date": new_award.award_date.isoformat()
-            }
-        }), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "新增獎項失敗", "error": str(e)}), 500
-
 @app.route('/awards', methods=['GET'])
 def get_all_awards():
     """
@@ -299,75 +244,6 @@ def get_all_awards():
         }
         output.append(award_data)
     return jsonify({"awards": output}), 200
-
-@app.route('/awards/<int:award_id>', methods=['GET'])
-def get_award(award_id):
-    """
-    根據 ID 取得單一獎項資訊。
-    """
-    award = db.session.get(Award, award_id)
-    if not award:
-        return jsonify({"message": f"找不到 ID 為 {award_id} 的獎項"}), 404
-
-    award_data = {
-        "id": award.id,
-        "prize_name": award.prize_name,
-        "winning_numbers": award.winning_numbers,
-        "award_date": award.award_date.isoformat()
-    }
-    return jsonify({"award": award_data}), 200
-
-@app.route('/awards/<int:award_id>', methods=['PUT'])
-def update_award(award_id):
-    """
-    更新一個獎項的資訊。
-    """
-    award = db.session.get(Award, award_id)
-    if not award:
-        return jsonify({"message": f"找不到 ID 為 {award_id} 的獎項"}), 404
-
-    data = request.get_json()
-    if not data:
-        return jsonify({"message": "請求數據無效，請提供JSON格式數據"}), 400
-
-    try:
-        if 'prize_name' in data:
-            award.prize_name = data['prize_name']
-        if 'winning_numbers' in data:
-            award.winning_numbers = data['winning_numbers']
-        if 'award_date' in data:
-            # 由於 award_date 不再是 unique，這裡不需要檢查日期重複
-            award.award_date = datetime.strptime(data['award_date'], '%Y-%m-%d').date()
-
-        db.session.commit()
-        return jsonify({"message": f"ID 為 {award_id} 的獎項更新成功"}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "更新獎項失敗", "error": str(e)}), 500
-
-@app.route('/awards/<int:award_id>', methods=['DELETE'])
-def delete_award(award_id):
-    """
-    刪除一個獎項。
-    刪除前會將所有關聯到此獎項的發票的 award_id 設為 NULL，並重置其中獎狀態。
-    """
-    award = db.session.get(Award, award_id)
-    if not award:
-        return jsonify({"message": f"找不到 ID 為 {award_id} 的獎項"}), 404
-
-    # 處理關聯的發票：將關聯的發票 award_id 設為 NULL，中獎狀態設為 False
-    associated_invoices = db.session.execute(db.select(Invoice).filter_by(award_id=award_id)).scalars().all()
-    for invoice in associated_invoices:
-        invoice.award_id = None
-        invoice.winning_status = False
-
-    try:
-        db.session.delete(award)
-        db.session.commit()
-        return jsonify({"message": f"ID 為 {award_id} 的獎項刪除成功"}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "刪除獎項失敗", "error": str(e)}), 500
 
 # --- 發票檢核 API ---
 
@@ -531,6 +407,164 @@ def check_invoice():
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "檢核發票失敗，更新資料庫錯誤", "error": str(e)}), 500
+    
+# --- 自動獲取開獎號碼 API (網頁爬蟲版本) ---
+
+@app.route('/fetch_awards', methods=['POST'])
+def fetch_awards():
+    """
+    從財政部電子發票平台（網頁）獲取最新開獎號碼並存入資料庫。
+    """
+    invoice_web_url = "https://invoice.etax.nat.gov.tw/" 
+
+    try:
+        response = requests.get(invoice_web_url)
+        response.encoding = 'utf-8' # 強制設定編碼為 UTF-8
+        response.raise_for_status() # 如果請求失敗，拋出 HTTPError
+        html_content = response.text
+    except requests.exceptions.RequestException as e:
+        return jsonify({"message": "無法從財政部網頁獲取開獎數據", "error": str(e)}), 500
+
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    try:
+        # 尋找帶有 etw-on class 的 <a> 標籤，並從 title 屬性獲取期別
+        period_element = soup.find('a', class_='etw-on')
+        
+        if not period_element:
+            return jsonify({"message": "無法解析網頁中的開獎期別信息，未找到包含期別的<a>標籤或其class已變更"}), 500
+
+        period_title = period_element.get('title', '')
+        period_text_raw = period_title.replace('中獎號碼單', '').strip()
+        
+        if not period_text_raw:
+            return jsonify({"message": "解析開獎期別文本失敗，title屬性內容無效"}), 500
+
+        actual_award_date = parse_award_date_from_period(period_text_raw)
+        
+        awards_to_save = []
+        
+        # **新的號碼提取邏輯：尋找所有 class 為 'text-center' 且 headers 為 'th01' 的 <td> 標籤作為獎項名稱**
+        # 然後獲取其後一個 <td> 內的 etw-tbiggest span
+        prize_name_tds = soup.find_all('td', headers='th01', class_='text-center')
+
+        for prize_name_td in prize_name_tds:
+            prize_name = prize_name_td.get_text(strip=True)
+            
+            # 獲取下一個 td 元素，它應該包含中獎號碼
+            numbers_td = prize_name_td.find_next_sibling('td')
+            
+            if numbers_td:
+                winning_numbers = []
+                # 在這個 numbers_td 內部尋找所有的 etw-tbiggest span
+                # 例如 <p class="etw-tbiggest"><span class="font-weight-bold etw-color-red">64557267</span></p>
+                # 或者頭獎可能有多個 <span class="etw-tbiggest">直接包含號碼，或嵌套在其他標籤裡
+                
+                # 首先嘗試直接從 etw-tbiggest 的 <p> 標籤中獲取，然後再看其內的 <span>
+                num_elements = numbers_td.find_all(class_='etw-tbiggest')
+
+                for elem in num_elements:
+                    # 考慮到號碼可能在 <p> 內，也可能在 <p> 內的 <span> 內
+                    num = elem.get_text(strip=True)
+                    if num:
+                        winning_numbers.append(num)
+                
+                # 特殊處理：增開六獎
+                # 增開六獎的號碼通常是獨立列出的，且可能在另一個 <p> 中，沒有 etw-tbiggest class
+                # 根據您之前提供的資訊，增開六獎的 <p> 可能沒有 class="etw-tbiggest"，
+                # 而是直接在一個 ul/li 結構中。
+                # 如果 prize_name 是 '增開六獎' 且 winning_numbers 為空，我們再嘗試尋找
+                if prize_name == "增開六獎" and not winning_numbers:
+                    # 重新查找網頁中與增開六獎相關的 li 標籤下的號碼 (如果結構如之前所說)
+                    add_six_label = soup.find('a', string='增開六獎')
+                    if add_six_label:
+                        # 查找其後的 li 元素，通常包含這些號碼
+                        add_six_li = add_six_label.find_next('li') 
+                        if add_six_li:
+                            add_six_spans = add_six_li.find_all('span', class_='etw-tbiggest') # 這裡假設它們有 etw-tbiggest
+                            for span in add_six_spans:
+                                num = span.get_text(strip=True)
+                                if num:
+                                    winning_numbers.append(num)
+
+                if winning_numbers:
+                    awards_to_save.append(Award(
+                        prize_name=prize_name,
+                        winning_numbers=",".join(winning_numbers),
+                        award_date=actual_award_date
+                    ))
+
+    except Exception as e:
+        return jsonify({"message": f"解析網頁內容失敗，請檢查網頁結構是否變更或聯繫開發者。錯誤: {str(e)}"}), 500
+
+    if not awards_to_save:
+        return jsonify({"message": "未能從網頁提取任何有效的開獎號碼，請檢查網頁結構或期別。"}), 404
+
+    try:
+        with db.session.begin():
+            for new_award_entry in awards_to_save:
+                existing_award = db.session.execute(
+                    db.select(Award).filter_by(
+                        award_date=new_award_entry.award_date,
+                        prize_name=new_award_entry.prize_name
+                    )
+                ).scalar_one_or_none()
+
+                if existing_award:
+                    existing_award.winning_numbers = new_award_entry.winning_numbers
+                    db.session.add(existing_award)
+                    print(f"更新現有獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}")
+                else:
+                    db.session.add(new_award_entry)
+                    print(f"新增獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}")
+
+            db.session.commit()
+        return jsonify({"message": "開獎號碼已成功獲取並更新至資料庫 (來自網頁爬蟲)"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": "儲存開獎號碼失敗", "error": str(e)}), 500
+
+# 輔助函數：從期別字串解析開獎日期
+def parse_award_date_from_period(period_str):
+    """
+    從統一發票期別字串 (e.g., "113年03-04月") 解析出實際開獎日期。
+    開獎日期是發票月份區間中第二個月份的下一個月的 25 號。
+    """
+    try:
+        # 移除前後空白和 '期' 字，例如 '113年03-04月'
+        cleaned_period_str = period_str.strip().replace('期', '')
+        
+        # 分割年份和月份範圍
+        parts = cleaned_period_str.split('年')
+        republic_year_str = parts[0]
+        month_range_str = parts[1].replace('月', '') # 例如 "03-04"
+
+        # 將民國年轉換為西元年
+        ce_year = int(republic_year_str) + 1911
+
+        # 提取月份範圍的第二個月份
+        end_month = int(month_range_str.split('-')[1])
+
+        # 計算實際開獎月份 (通常是第二個月份的下一個月)
+        # 例如 03-04月發票在 05/25 開獎
+        # 01-02月發票在 03/25 開獎
+        award_month = (end_month % 12) + 1 # 處理 12 月跨年到次年 1 月的情況
+
+        # 開獎日期固定是 25 日
+        award_day = 25
+
+        # 處理跨年情況 (例如 112年11-12月發票，在 113年01月25日開獎)
+        if end_month == 12:
+            # 如果發票期是 11-12月，開獎月份是 1月，但年份應為下一年
+            ce_year += 1 
+        
+        return datetime(ce_year, award_month, award_day).date()
+    except Exception as e:
+        print(f"解析期別 '{period_str}' 失敗: {e}")
+        # 如果解析失敗，提供一個合理的預設值或拋出錯誤
+        # 這裡為了繼續流程，可以返回 None 或拋出，但在實際應用中應有更完善的錯誤處理
+        raise ValueError(f"無法從期別 '{period_str}' 解析出正確的開獎日期: {e}")
+
 
 if __name__ == '__main__':
     # 在生產環境中，資料庫表的創建和更新應由 Alembic 這樣的遷移工具處理。
