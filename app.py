@@ -282,12 +282,6 @@ def check_invoice():
     if len(invoice_number) != 8 or not invoice_number.isdigit(): # 增加數字檢查
         return jsonify({"message": "發票號碼應為8位數字"}), 400
 
-    # 1. 查找資料庫中是否存在該發票號碼
-    invoice = db.session.execute(db.select(Invoice).filter_by(invoice_number=invoice_number)).scalar_one_or_none()
-
-    if not invoice:
-        return jsonify({"message": f"發票號碼 '{invoice_number}' 不存在，請先新增發票"}), 404
-
     # 2. 根據開獎日期查詢所有獎項號碼
     awards_for_date = db.session.execute(
         db.select(Award).filter_by(award_date=check_date)
@@ -369,37 +363,31 @@ def check_invoice():
         if is_winning and award.prize_name in ["特別獎", "特獎", "頭獎"]: # 如果是大獎，中了就停止所有比對
             break
 
-    # 4. 更新發票的中獎狀態
-    if is_winning:
-        invoice.winning_status = True
-        # 確保 winning_award 存在才設定 award_id
-        invoice.award_id = winning_award.id if winning_award else None
-    else:
-        invoice.winning_status = False
-        invoice.award_id = None # 如果之前有中獎，現在沒中，則重置
-
     try:
-        db.session.commit()
-        # 返回最高獎項的詳細資訊
-        if winning_details:
-            # 由於我們是從高到低排序並比對，第一個找到的 winning_details 應該就是最高獎項
-            # 這裡只返回第一個找到的獎項，或者您可以選擇返回 winning_details 列表
-            highest_prize_detail = winning_details[0] 
+        if is_winning: # 如果有中獎
+            highest_prize_detail = winning_details[0] # 獲取最高獎項的詳細信息
+
             return jsonify({
                 "message": highest_prize_detail["message"],
                 "invoice_number": invoice_number,
                 "invoice_date": check_date.isoformat(),
-                "winning_status": invoice.winning_status,
+                "winning_status": True, # 直接設定為 True 因為中獎了
                 "award_details": {
                     "prize_name": highest_prize_detail["prize"],
                     "winning_numbers": winning_award.winning_numbers # 顯示該獎項的完整號碼
-                } if winning_award else None
+                } if winning_award else None # 確保 winning_award 存在才提供詳情
             }), 200
-        else:
-            return jsonify({"message": result_message, "invoice_number": invoice_number, "invoice_date": check_date.isoformat(), "winning_status": invoice.winning_status, "award_details": None}), 200
+        else: # 如果未中獎
+            return jsonify({
+                "message": result_message, # 預設的「未中獎」訊息
+                "invoice_number": invoice_number,
+                "invoice_date": check_date.isoformat(),
+                "winning_status": False, # 直接設定為 False 因為未中獎
+                "award_details": None # 未中獎則無獎項詳情
+            }), 200
     except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "檢核發票失敗，更新資料庫錯誤", "error": str(e)}), 500
+        print(f"對獎過程中發生錯誤: {e}", flush=True) # 打印錯誤到日誌
+        return jsonify({"message": "檢核發票失敗，發生內部錯誤", "error": str(e)}), 500
     
 # --- 自動獲取開獎號碼 API (網頁爬蟲版本) (保持不變) ---
 @app.route('/fetch_awards', methods=['POST'])
