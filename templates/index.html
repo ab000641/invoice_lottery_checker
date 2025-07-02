@@ -56,16 +56,19 @@
             text-align: center;
         }
         .check-section input[type="text"],
-        .check-section input[type="date"] { /* 新增日期輸入框樣式 */
+        .check-section select { /* 樣式應用於 select */
             padding: 10px;
             width: 70%;
-            max-width: 200px; /* 調整寬度 */
+            max-width: 200px;
             margin-right: 10px;
-            margin-bottom: 10px; /* 增加間距 */
+            margin-bottom: 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
             font-size: 1em;
-            box-sizing: border-box; /* 確保 padding 不增加總寬度 */
+            box-sizing: border-box;
+        }
+        .check-section select.small-width { /* 對月份和年份下拉選單寬度更小 */
+            max-width: 100px; /* 或更小 */
         }
         .check-section button {
             padding: 10px 20px;
@@ -88,10 +91,10 @@
             text-align: center;
         }
         .result-win {
-            color: #28a745; /* 綠色 */
+            color: #28a745;
         }
         .result-lose {
-            color: #dc3545; /* 紅色 */
+            color: #dc3545;
         }
     </style>
 </head>
@@ -99,17 +102,16 @@
     <div class="container">
         <h1>統一發票開獎號碼與對獎</h1>
 
-        <!-- 發票對獎區塊 -->
         <div class="check-section">
             <h2>發票對獎</h2>
             <input type="text" id="invoiceNumberInput" placeholder="請輸入8位發票號碼" maxlength="8"><br>
-            <input type="date" id="invoiceDateInput"> <!-- 新增日期輸入框 -->
-            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">請輸入發票對應的開獎日期 (例如：1-2月發票請選3月25日)</p>
+            <select id="invoiceYearInput" class="small-width"></select>
+            <select id="invoiceMonthInput" class="small-width"></select>
+            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">請選擇發票的年份與開立月份</p>
             <button id="checkInvoiceButton">對獎</button>
             <div id="check-result"></div>
         </div>
 
-        <!-- 開獎號碼列表區塊 -->
         <h2 style="margin-top: 40px;">近期開獎號碼</h2>
         <div id="awards-list" class="loading">載入中...</div>
     </div>
@@ -118,11 +120,36 @@
         document.addEventListener('DOMContentLoaded', function() {
             const awardsListDiv = document.getElementById('awards-list');
             const invoiceNumberInput = document.getElementById('invoiceNumberInput');
-            const invoiceDateInput = document.getElementById('invoiceDateInput'); // 獲取日期輸入框
+            const invoiceYearInput = document.getElementById('invoiceYearInput');
+            const invoiceMonthInput = document.getElementById('invoiceMonthInput');
             const checkInvoiceButton = document.getElementById('checkInvoiceButton');
             const checkResultDiv = document.getElementById('check-result');
 
-            // --- 載入開獎號碼列表 ---
+            // --- 初始化年份和月份下拉選單 ---
+            function populateDateSelectors() {
+                const currentYear = new Date().getFullYear();
+                // 年份範圍：從去年開始到明年
+                for (let i = currentYear - 1; i <= currentYear + 1; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i + '年';
+                    if (i === currentYear) {
+                        option.selected = true; // 預設選擇今年
+                    }
+                    invoiceYearInput.appendChild(option);
+                }
+
+                for (let i = 1; i <= 12; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i + '月';
+                    // 可以設定預設選擇當前月份 (如果有的話)
+                    // if (i === new Date().getMonth() + 1) { option.selected = true; }
+                    invoiceMonthInput.appendChild(option);
+                }
+            }
+
+            // --- 載入開獎號碼列表 (與之前相同) ---
             function fetchAwards() {
                 awardsListDiv.innerHTML = '<div class="loading">載入中...</div>';
                 fetch('/awards')
@@ -160,7 +187,8 @@
             // --- 發票對獎功能 ---
             checkInvoiceButton.addEventListener('click', function() {
                 const invoiceNumber = invoiceNumberInput.value.trim();
-                const invoiceDate = invoiceDateInput.value; // 獲取日期值
+                const selectedYear = parseInt(invoiceYearInput.value, 10);
+                const selectedMonth = parseInt(invoiceMonthInput.value, 10);
 
                 checkResultDiv.className = '';
                 checkResultDiv.innerHTML = '';
@@ -170,11 +198,38 @@
                     checkResultDiv.textContent = '請輸入有效的8位數字發票號碼！';
                     return;
                 }
-                if (!invoiceDate) {
+                if (isNaN(selectedYear) || isNaN(selectedMonth)) {
                     checkResultDiv.className = 'error';
-                    checkResultDiv.textContent = '請選擇發票對應的開獎日期！';
+                    checkResultDiv.textContent = '請選擇發票年份和月份！';
                     return;
                 }
+
+                // --- 核心邏輯：根據發票月份計算開獎日期 ---
+                let awardYear = selectedYear;
+                let awardMonth;
+
+                // 根據發票月份判斷開獎月份
+                // 1-2月發票 → 3月開獎
+                // 3-4月發票 → 5月開獎
+                // ...
+                // 11-12月發票 → 次年1月開獎
+                if (selectedMonth % 2 === 1) { // 奇數月 (1, 3, 5, 7, 9, 11)
+                    awardMonth = selectedMonth + 2;
+                } else { // 偶數月 (2, 4, 6, 8, 10, 12)
+                    awardMonth = selectedMonth + 1;
+                }
+
+                // 處理跨年情況 (11-12月發票開獎在次年1月)
+                if (awardMonth > 12) {
+                    awardMonth = 1; // 1月
+                    awardYear += 1; // 年份加一
+                }
+
+                // 開獎日期固定為 25 日
+                const awardDay = 25;
+
+                // 格式化為 YYYY-MM-DD 字串
+                const formattedAwardDate = `${awardYear}-${String(awardMonth).padStart(2, '0')}-${String(awardDay).padStart(2, '0')}`;
 
                 checkResultDiv.textContent = '正在對獎中...';
 
@@ -185,7 +240,7 @@
                     },
                     body: JSON.stringify({
                         invoice_number: invoiceNumber,
-                        invoice_date: invoiceDate // 將日期也發送給後端
+                        invoice_date: formattedAwardDate // 發送計算出的開獎日期
                     })
                 })
                 .then(response => {
@@ -195,7 +250,7 @@
                     return response.json();
                 })
                 .then(data => {
-                    if (data.winning_status) { // 根據後端返回的 winning_status 判斷
+                    if (data.winning_status) {
                         checkResultDiv.className = 'result-win';
                         checkResultDiv.innerHTML = `恭喜！您的發票中獎了！<br>${data.message}`;
                     } else {
@@ -210,7 +265,8 @@
                 });
             });
 
-            // 頁面載入時自動載入開獎號碼
+            // 頁面載入時執行初始化和資料載入
+            populateDateSelectors();
             fetchAwards();
         });
     </script>
