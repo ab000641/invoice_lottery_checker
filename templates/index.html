@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>發票開獎號碼查詢</title>
+    <title>統一發票開獎號碼與對獎</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -19,10 +19,10 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
-        h1 {
+        h1, h2 {
             color: #0056b3;
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
         .award-item {
             background-color: #e9ecef;
@@ -31,7 +31,7 @@
             margin-bottom: 10px;
             border-radius: 5px;
         }
-        .award-item h2 {
+        .award-item h3 {
             margin-top: 0;
             color: #007bff;
         }
@@ -48,49 +48,170 @@
             font-size: 1.2em;
             color: #dc3545;
         }
+        /* 發票對獎介面樣式 */
+        .check-section {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+        }
+        .check-section input[type="text"],
+        .check-section input[type="date"] { /* 新增日期輸入框樣式 */
+            padding: 10px;
+            width: 70%;
+            max-width: 200px; /* 調整寬度 */
+            margin-right: 10px;
+            margin-bottom: 10px; /* 增加間距 */
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 1em;
+            box-sizing: border-box; /* 確保 padding 不增加總寬度 */
+        }
+        .check-section button {
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease;
+        }
+        .check-section button:hover {
+            background-color: #218838;
+        }
+        #check-result {
+            margin-top: 20px;
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #0056b3;
+            text-align: center;
+        }
+        .result-win {
+            color: #28a745; /* 綠色 */
+        }
+        .result-lose {
+            color: #dc3545; /* 紅色 */
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>統一發票開獎號碼</h1>
+        <h1>統一發票開獎號碼與對獎</h1>
+
+        <!-- 發票對獎區塊 -->
+        <div class="check-section">
+            <h2>發票對獎</h2>
+            <input type="text" id="invoiceNumberInput" placeholder="請輸入8位發票號碼" maxlength="8"><br>
+            <input type="date" id="invoiceDateInput"> <!-- 新增日期輸入框 -->
+            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">請輸入發票對應的開獎日期 (例如：1-2月發票請選3月25日)</p>
+            <button id="checkInvoiceButton">對獎</button>
+            <div id="check-result"></div>
+        </div>
+
+        <!-- 開獎號碼列表區塊 -->
+        <h2 style="margin-top: 40px;">近期開獎號碼</h2>
         <div id="awards-list" class="loading">載入中...</div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const awardsListDiv = document.getElementById('awards-list');
+            const invoiceNumberInput = document.getElementById('invoiceNumberInput');
+            const invoiceDateInput = document.getElementById('invoiceDateInput'); // 獲取日期輸入框
+            const checkInvoiceButton = document.getElementById('checkInvoiceButton');
+            const checkResultDiv = document.getElementById('check-result');
 
-            fetch('/awards') // 向後端 /awards 路由發送請求
+            // --- 載入開獎號碼列表 ---
+            function fetchAwards() {
+                awardsListDiv.innerHTML = '<div class="loading">載入中...</div>';
+                fetch('/awards')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        awardsListDiv.innerHTML = '';
+                        if (data.awards && data.awards.length > 0) {
+                            data.awards.sort((a, b) => new Date(b.award_date) - new Date(a.award_date));
+
+                            data.awards.forEach(award => {
+                                const awardItem = document.createElement('div');
+                                awardItem.className = 'award-item';
+                                awardItem.innerHTML = `
+                                    <h3>${award.prize_name}</h3>
+                                    <p><strong>開獎日期:</strong> ${award.award_date}</p>
+                                    <p><strong>中獎號碼:</strong> ${award.winning_numbers}</p>
+                                `;
+                                awardsListDiv.appendChild(awardItem);
+                            });
+                        } else {
+                            awardsListDiv.innerHTML = '<p>目前沒有開獎號碼資料。</p>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('獲取開獎號碼失敗:', error);
+                        awardsListDiv.innerHTML = `<p class="error">載入開獎號碼失敗: ${error.message}</p>`;
+                    });
+            }
+
+            // --- 發票對獎功能 ---
+            checkInvoiceButton.addEventListener('click', function() {
+                const invoiceNumber = invoiceNumberInput.value.trim();
+                const invoiceDate = invoiceDateInput.value; // 獲取日期值
+
+                checkResultDiv.className = '';
+                checkResultDiv.innerHTML = '';
+
+                if (invoiceNumber.length !== 8 || !/^\d+$/.test(invoiceNumber)) {
+                    checkResultDiv.className = 'error';
+                    checkResultDiv.textContent = '請輸入有效的8位數字發票號碼！';
+                    return;
+                }
+                if (!invoiceDate) {
+                    checkResultDiv.className = 'error';
+                    checkResultDiv.textContent = '請選擇發票對應的開獎日期！';
+                    return;
+                }
+
+                checkResultDiv.textContent = '正在對獎中...';
+
+                fetch('/check_invoice', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        invoice_number: invoiceNumber,
+                        invoice_date: invoiceDate // 將日期也發送給後端
+                    })
+                })
                 .then(response => {
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        return response.json().then(err => { throw new Error(err.message || '伺服器錯誤'); });
                     }
                     return response.json();
                 })
                 .then(data => {
-                    awardsListDiv.innerHTML = ''; // 清空載入中的訊息
-                    if (data.awards && data.awards.length > 0) {
-                        // 根據 award_date 降序排序，最新的在最上面
-                        data.awards.sort((a, b) => new Date(b.award_date) - new Date(a.award_date));
-
-                        data.awards.forEach(award => {
-                            const awardItem = document.createElement('div');
-                            awardItem.className = 'award-item';
-                            awardItem.innerHTML = `
-                                <h2>${award.prize_name}</h2>
-                                <p><strong>開獎日期:</strong> ${award.award_date}</p>
-                                <p><strong>中獎號碼:</strong> ${award.winning_numbers}</p>
-                            `;
-                            awardsListDiv.appendChild(awardItem);
-                        });
+                    if (data.winning_status) { // 根據後端返回的 winning_status 判斷
+                        checkResultDiv.className = 'result-win';
+                        checkResultDiv.innerHTML = `恭喜！您的發票中獎了！<br>${data.message}`;
                     } else {
-                        awardsListDiv.innerHTML = '<p>目前沒有開獎號碼資料。</p>';
+                        checkResultDiv.className = 'result-lose';
+                        checkResultDiv.textContent = data.message || '很抱歉，您的發票沒有中獎。';
                     }
                 })
                 .catch(error => {
-                    console.error('獲取開獎號碼失敗:', error);
-                    awardsListDiv.innerHTML = `<p class="error">載入開獎號碼失敗: ${error.message}</p>`;
+                    console.error('對獎失敗:', error);
+                    checkResultDiv.className = 'error';
+                    checkResultDiv.textContent = `對獎發生錯誤: ${error.message}`;
                 });
+            });
+
+            // 頁面載入時自動載入開獎號碼
+            fetchAwards();
         });
     </script>
 </body>
