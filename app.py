@@ -7,15 +7,24 @@ from sqlalchemy.orm import relationship
 from dotenv import load_dotenv
 from datetime import datetime
 from bs4 import BeautifulSoup
+from flask_apscheduler import APScheduler
+# 不需要明確導入 BackgroundScheduler，Flask-APScheduler 會自行處理
 
 # 加載 .env 檔案中的環境變數
 load_dotenv()
 
 app = Flask(__name__)
-
+app.json.ensure_ascii = False
 # 從環境變數配置資料庫
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # 禁用事件追蹤，減少記憶體開銷
+
+# --- Flask-APScheduler 初始化 ---
+# 直接初始化 APScheduler 實例
+scheduler = APScheduler()
+# 將 APScheduler 綁定到 Flask app
+scheduler.init_app(app) 
+
 
 db = SQLAlchemy(app)
 
@@ -409,12 +418,22 @@ def check_invoice():
         return jsonify({"message": "檢核發票失敗，更新資料庫錯誤", "error": str(e)}), 500
     
 # --- 自動獲取開獎號碼 API (網頁爬蟲版本) ---
-
+# 這個路由仍保留，可以手動觸發爬蟲
 @app.route('/fetch_awards', methods=['POST'])
 def fetch_awards():
     """
     從財政部電子發票平台（網頁）獲取最新開獎號碼並存入資料庫。
     """
+    try:
+        # 將核心邏輯包裝在一個輔助函數中，以便排程器和路由都能調用
+        # 這樣可以避免程式碼重複
+        _execute_fetch_awards_logic()
+        return jsonify({"message": "開獎號碼已成功獲取並更新至資料庫 (來自手動觸發)"}), 200
+    except Exception as e:
+        return jsonify({"message": "手動獲取開獎號碼失敗", "error": str(e)}), 500
+
+# 將核心爬蟲和儲存邏輯抽離成一個獨立的函數
+def _execute_fetch_awards_logic():
     invoice_web_url = "https://invoice.etax.nat.gov.tw/" 
 
     try:
@@ -423,7 +442,7 @@ def fetch_awards():
         response.raise_for_status() # 如果請求失敗，拋出 HTTPError
         html_content = response.text
     except requests.exceptions.RequestException as e:
-        return jsonify({"message": "無法從財政部網頁獲取開獎數據", "error": str(e)}), 500
+        raise Exception(f"無法從財政部網頁獲取開獎數據: {str(e)}")
 
     soup = BeautifulSoup(html_content, 'html.parser')
 
@@ -432,13 +451,13 @@ def fetch_awards():
         period_element = soup.find('a', class_='etw-on')
         
         if not period_element:
-            return jsonify({"message": "無法解析網頁中的開獎期別信息，未找到包含期別的<a>標籤或其class已變更"}), 500
+            raise Exception("無法解析網頁中的開獎期別信息，未找到包含期別的<a>標籤或其class已變更")
 
         period_title = period_element.get('title', '')
         period_text_raw = period_title.replace('中獎號碼單', '').strip()
         
         if not period_text_raw:
-            return jsonify({"message": "解析開獎期別文本失敗，title屬性內容無效"}), 500
+            raise Exception("解析開獎期別文本失敗，title屬性內容無效")
 
         actual_award_date = parse_award_date_from_period(period_text_raw)
         
@@ -457,31 +476,20 @@ def fetch_awards():
             if numbers_td:
                 winning_numbers = []
                 # 在這個 numbers_td 內部尋找所有的 etw-tbiggest span
-                # 例如 <p class="etw-tbiggest"><span class="font-weight-bold etw-color-red">64557267</span></p>
-                # 或者頭獎可能有多個 <span class="etw-tbiggest">直接包含號碼，或嵌套在其他標籤裡
-                
-                # 首先嘗試直接從 etw-tbiggest 的 <p> 標籤中獲取，然後再看其內的 <span>
                 num_elements = numbers_td.find_all(class_='etw-tbiggest')
 
                 for elem in num_elements:
-                    # 考慮到號碼可能在 <p> 內，也可能在 <p> 內的 <span> 內
                     num = elem.get_text(strip=True)
                     if num:
                         winning_numbers.append(num)
                 
                 # 特殊處理：增開六獎
-                # 增開六獎的號碼通常是獨立列出的，且可能在另一個 <p> 中，沒有 etw-tbiggest class
-                # 根據您之前提供的資訊，增開六獎的 <p> 可能沒有 class="etw-tbiggest"，
-                # 而是直接在一個 ul/li 結構中。
-                # 如果 prize_name 是 '增開六獎' 且 winning_numbers 為空，我們再嘗試尋找
                 if prize_name == "增開六獎" and not winning_numbers:
-                    # 重新查找網頁中與增開六獎相關的 li 標籤下的號碼 (如果結構如之前所說)
                     add_six_label = soup.find('a', string='增開六獎')
                     if add_six_label:
-                        # 查找其後的 li 元素，通常包含這些號碼
                         add_six_li = add_six_label.find_next('li') 
                         if add_six_li:
-                            add_six_spans = add_six_li.find_all('span', class_='etw-tbiggest') # 這裡假設它們有 etw-tbiggest
+                            add_six_spans = add_six_li.find_all('span', class_='etw-tbiggest')
                             for span in add_six_spans:
                                 num = span.get_text(strip=True)
                                 if num:
@@ -495,10 +503,10 @@ def fetch_awards():
                     ))
 
     except Exception as e:
-        return jsonify({"message": f"解析網頁內容失敗，請檢查網頁結構是否變更或聯繫開發者。錯誤: {str(e)}"}), 500
+        raise Exception(f"解析網頁內容失敗，請檢查網頁結構是否變更或聯繫開發者。錯誤: {str(e)}")
 
     if not awards_to_save:
-        return jsonify({"message": "未能從網頁提取任何有效的開獎號碼，請檢查網頁結構或期別。"}), 404
+        raise Exception("未能從網頁提取任何有效的開獎號碼，請檢查網頁結構或期別。")
 
     try:
         with db.session.begin():
@@ -513,16 +521,16 @@ def fetch_awards():
                 if existing_award:
                     existing_award.winning_numbers = new_award_entry.winning_numbers
                     db.session.add(existing_award)
-                    print(f"更新現有獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}")
+                    print(f"更新現有獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}", flush=True)
                 else:
                     db.session.add(new_award_entry)
-                    print(f"新增獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}")
+                    print(f"新增獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}", flush=True)
 
             db.session.commit()
-        return jsonify({"message": "開獎號碼已成功獲取並更新至資料庫 (來自網頁爬蟲)"}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({"message": "儲存開獎號碼失敗", "error": str(e)}), 500
+        raise Exception(f"儲存開獎號碼失敗: {str(e)}")
+
 
 # 輔助函數：從期別字串解析開獎日期
 def parse_award_date_from_period(period_str):
@@ -560,15 +568,56 @@ def parse_award_date_from_period(period_str):
         
         return datetime(ce_year, award_month, award_day).date()
     except Exception as e:
-        print(f"解析期別 '{period_str}' 失敗: {e}")
+        print(f"解析期別 '{period_str}' 失敗: {e}", flush=True)
         # 如果解析失敗，提供一個合理的預設值或拋出錯誤
         # 這裡為了繼續流程，可以返回 None 或拋出，但在實際應用中應有更完善的錯誤處理
         raise ValueError(f"無法從期別 '{period_str}' 解析出正確的開獎日期: {e}")
 
+# --- 檢視排程任務狀態 ---
+@app.route('/scheduler_status', methods=['GET'])
+def scheduler_status():
+    """
+    查看 APScheduler 目前排程中的所有任務。
+    """
+    if not scheduler.running:
+        return jsonify({"status": "scheduler is not running"}), 200
+
+    jobs = []
+    for job in scheduler.get_jobs():
+        jobs.append({
+            "id": job.id,
+            "name": job.name,
+            "trigger": str(job.trigger),
+            "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+            "func": job.func_ref
+        })
+    return jsonify({"status": "scheduler running", "jobs": jobs}), 200
+
+
+# 設定排程任務
+# 這裡設定為每 12 小時執行一次 fetch_awards
+# 您可以根據實際需求調整 interval 或使用 cron 設定更精確的時間
+@scheduler.task('interval', id='do_fetch_awards', hours=12, misfire_grace_time=900)
+def scheduled_fetch_awards():
+    with app.app_context(): # 確保在應用程式上下文中執行
+        print("--- 排程任務啟動：自動獲取開獎號碼 ---", flush=True)
+        try:
+            # 調用抽離出來的核心邏輯函數
+            _execute_fetch_awards_logic()
+            print("--- 排程任務完成：開獎號碼已成功獲取並更新至資料庫 ---", flush=True)
+        except Exception as e:
+            # 任務失敗時，回滾可能存在的資料庫事務（_execute_fetch_awards_logic 內部已有處理）
+            # 並打印錯誤信息
+            print(f"--- 排程任務失敗：儲存開獎號碼失敗。錯誤: {str(e)} ---", flush=True)
+
+def init_db():
+    with app.app_context():
+        print("--- 正在創建或更新資料庫表結構 ---", flush=True)
+        db.create_all()
+        print("--- 資料庫表結構已完成 ---", flush=True)
+
 
 if __name__ == '__main__':
-    # 在生產環境中，資料庫表的創建和更新應由 Alembic 這樣的遷移工具處理。
-    # 這裡不再調用 db.create_all()，避免與 Alembic 衝突或造成混淆。
-    # 如果您是在開發環境，且尚未設置 Alembic，需要手動或透過腳本創建數據庫和表。
-    print("Flask 應用程式已啟動。請確保您的資料庫Schema已通過Alembic正確初始化和更新。")
+    print("Flask 應用程式已啟動。請確保您的資料庫Schema已通過Alembic正確初始化和更新。", flush=True)
+    # !!! 這裡也確保沒有 scheduler.start() 的呼叫 !!!
     app.run(host='0.0.0.0', port=5000, debug=True)
