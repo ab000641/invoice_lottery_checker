@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>發票開獎號碼查詢</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #0056b3;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .award-item {
+            background-color: #e9ecef;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .award-item h2 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .award-item p {
+            margin: 5px 0;
+        }
+        .loading {
+            text-align: center;
+            font-size: 1.2em;
+            color: #666;
+        }
+        .error {
+            text-align: center;
+            font-size: 1.2em;
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>統一發票開獎號碼</h1>
+        <div id="awards-list" class="loading">載入中...</div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const awardsListDiv = document.getElementById('awards-list');
+
+            fetch('/awards') // 向後端 /awards 路由發送請求
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    awardsListDiv.innerHTML = ''; // 清空載入中的訊息
+                    if (data.awards && data.awards.length > 0) {
+                        // 根據 award_date 降序排序，最新的在最上面
+                        data.awards.sort((a, b) => new Date(b.award_date) - new Date(a.award_date));
+
+                        data.awards.forEach(award => {
+                            const awardItem = document.createElement('div');
+                            awardItem.className = 'award-item';
+                            awardItem.innerHTML = `
+                                <h2>${award.prize_name}</h2>
+                                <p><strong>開獎日期:</strong> ${award.award_date}</p>
+                                <p><strong>中獎號碼:</strong> ${award.winning_numbers}</p>
+                            `;
+                            awardsListDiv.appendChild(awardItem);
+                        });
+                    } else {
+                        awardsListDiv.innerHTML = '<p>目前沒有開獎號碼資料。</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('獲取開獎號碼失敗:', error);
+                    awardsListDiv.innerHTML = `<p class="error">載入開獎號碼失敗: ${error.message}</p>`;
+                });
+        });
+    </script>
+</body>
+</html>

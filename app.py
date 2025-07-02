@@ -1,6 +1,6 @@
 import os
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
@@ -73,7 +73,21 @@ class User(db.Model):
 
 @app.route('/')
 def index():
-    return "統一發票兌獎網站後端服務已啟動！"
+    return render_template('index.html') # 會去 templates/index.html 找這個檔案
+
+# 現有的 /awards API 路由 (確保其正常運作並返回 JSON)
+@app.route('/awards', methods=['GET'])
+def get_awards():
+    awards = Award.query.all()
+    awards_data = []
+    for award in awards:
+        awards_data.append({
+            "id": award.id,
+            "prize_name": award.prize_name,
+            "winning_numbers": award.winning_numbers,
+            "award_date": award.award_date.strftime('%Y-%m-%d')
+        })
+    return jsonify({"awards": awards_data})
 
 @app.route('/health')
 def health_check():
