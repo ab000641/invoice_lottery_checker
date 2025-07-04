@@ -24,20 +24,7 @@
             text-align: center;
             margin-bottom: 20px;
         }
-        .award-item {
-            background-color: #e9ecef;
-            border: 1px solid #dee2e6;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 5px;
-        }
-        .award-item h3 {
-            margin-top: 0;
-            color: #007bff;
-        }
-        .award-item p {
-            margin: 5px 0;
-        }
+        
         .loading {
             text-align: center;
             font-size: 1.2em;
@@ -100,7 +87,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>統一發票開獎號碼與對獎</h1>
+        <h1>統一發票對獎系統</h1>
 
         <div class="check-section">
             <h2>發票對獎</h2>
@@ -112,20 +99,17 @@
             <div id="check-result"></div>
         </div>
 
-        <h2 style="margin-top: 40px;">近期開獎號碼</h2>
-        <div id="awards-list" class="loading">載入中...</div>
-    </div>
+        </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const awardsListDiv = document.getElementById('awards-list');
             const invoiceNumberInput = document.getElementById('invoiceNumberInput');
             const invoiceYearInput = document.getElementById('invoiceYearInput');
             const invoiceMonthInput = document.getElementById('invoiceMonthInput');
             const checkInvoiceButton = document.getElementById('checkInvoiceButton');
             const checkResultDiv = document.getElementById('check-result');
 
-            // --- 初始化年份和月份下拉選單 ---
+            // --- 初始化年份和月份下拉選單 (與之前相同) ---
             function populateDateSelectors() {
                 const currentYear = new Date().getFullYear();
                 // 年份範圍：從去年開始到明年
@@ -149,42 +133,8 @@
                 }
             }
 
-            // --- 載入開獎號碼列表 (與之前相同) ---
-            function fetchAwards() {
-                awardsListDiv.innerHTML = '<div class="loading">載入中...</div>';
-                fetch('/awards')
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        awardsListDiv.innerHTML = '';
-                        if (data.awards && data.awards.length > 0) {
-                            data.awards.sort((a, b) => new Date(b.award_date) - new Date(a.award_date));
 
-                            data.awards.forEach(award => {
-                                const awardItem = document.createElement('div');
-                                awardItem.className = 'award-item';
-                                awardItem.innerHTML = `
-                                    <h3>${award.prize_name}</h3>
-                                    <p><strong>開獎日期:</strong> ${award.award_date}</p>
-                                    <p><strong>中獎號碼:</strong> ${award.winning_numbers}</p>
-                                `;
-                                awardsListDiv.appendChild(awardItem);
-                            });
-                        } else {
-                            awardsListDiv.innerHTML = '<p>目前沒有開獎號碼資料。</p>';
-                        }
-                    })
-                    .catch(error => {
-                        console.error('獲取開獎號碼失敗:', error);
-                        awardsListDiv.innerHTML = `<p class="error">載入開獎號碼失敗: ${error.message}</p>`;
-                    });
-            }
-
-            // --- 發票對獎功能 ---
+            // --- 發票對獎功能 (與之前相同) ---
             checkInvoiceButton.addEventListener('click', function() {
                 const invoiceNumber = invoiceNumberInput.value.trim();
                 const selectedYear = parseInt(invoiceYearInput.value, 10);
@@ -228,7 +178,7 @@
                 // 開獎日期固定為 25 日
                 const awardDay = 25;
 
-                // 格式化為 YYYY-MM-DD 字串
+                // 格式化為YYYY-MM-DD 字串
                 const formattedAwardDate = `${awardYear}-${String(awardMonth).padStart(2, '0')}-${String(awardDay).padStart(2, '0')}`;
 
                 checkResultDiv.textContent = '正在對獎中...';
@@ -265,9 +215,8 @@
                 });
             });
 
-            // 頁面載入時執行初始化和資料載入
+            // 頁面載入時執行初始化
             populateDateSelectors();
-            fetchAwards();
         });
     </script>
 </body>
