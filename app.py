@@ -1,6 +1,6 @@
 import os
 import requests
-from flask import Flask, jsonify, request, render_template # 確保導入 render_template
+from flask import Flask, jsonify, request, render_template
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
@@ -252,7 +252,6 @@ def get_all_awards():
     return jsonify({"awards": output}), 200
 
 # --- 發票檢核 API ---
-# 使用您提供的版本，並進行微調以確保發票號碼清理
 @app.route('/check_invoice', methods=['POST'])
 def check_invoice():
     """
@@ -297,9 +296,17 @@ def check_invoice():
 
     # 3. 比對發票號碼與中獎號碼
     # 按照獎項等級從高到低比對，確保正確判斷中獎狀態和訊息
+    # 修正後的 prize_order，確保依獎金高低排序
     prize_order = {
-        "特別獎": 1, "特獎": 2, "頭獎": 3, "增開六獎": 4,
-        "二獎": 5, "三獎": 6, "四獎": 7, "五獎": 8, "六獎": 9
+        "特別獎": 1,
+        "特獎": 2,
+        "頭獎": 3,
+        "二獎": 4,
+        "三獎": 5,
+        "四獎": 6,
+        "五獎": 7,
+        "六獎": 8,
+        "增開六獎": 9 # 增開六獎放在最後，因為獎金最低且為額外增開
     }
 
     # 對獎項進行排序，確保高獎項先比對
@@ -313,83 +320,99 @@ def check_invoice():
     ]
 
     for award in awards_for_date:
+        # winning_numbers_list 只用於特別獎、特獎、頭獎的完全比對 (或增開六獎的末三碼比對，如果它有自己的獨立號碼)
+        # 對於二獎到六獎和增開六獎，我們將使用 head_prize_numbers
         winning_numbers_list = [n.strip() for n in award.winning_numbers.split(',')]
 
-        for num in winning_numbers_list:
-            if award.prize_name == "特別獎":
-                if invoice_number == num:
+        # 首先處理需要完全比對的獎項 (特別獎, 特獎, 頭獎)
+        if award.prize_name == "特別獎":
+            for winning_num_exact in winning_numbers_list: 
+                if invoice_number == winning_num_exact:
                     is_winning = True
                     winning_award = award
-                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼: {num}"})
-                    break # 特別獎是最高獎項，中了就停止
-            elif award.prize_name == "特獎":
-                if invoice_number == num:
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼: {winning_num_exact}"})
+                    break 
+            if is_winning: 
+                break 
+
+        elif award.prize_name == "特獎":
+            for winning_num_exact in winning_numbers_list:
+                if invoice_number == winning_num_exact:
                     is_winning = True
                     winning_award = award
-                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼: {num}"})
-                    break # 特獎是第二高獎項，中了就停止
-            elif award.prize_name == "頭獎":
-                if invoice_number[-8:] == num: # 頭獎也是完全比對
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼: {winning_num_exact}"})
+                    break 
+            if is_winning: 
+                break
+
+        elif award.prize_name == "頭獎":
+            for winning_num_exact in winning_numbers_list:
+                if invoice_number == winning_num_exact:
                     is_winning = True
                     winning_award = award
-                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼: {num}"})
-                    break
-            elif award.prize_name == "增開六獎":
-                if invoice_number[-3:] == num:
-                    is_winning = True
-                    winning_award = award
-                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後三碼: {num}"})
-                    break
-            # 處理二獎、三獎、四獎、五獎、六獎 (這些獎項是基於頭獎號碼後幾碼)
-            elif award.prize_name in ["二獎", "三獎", "四獎", "五獎", "六獎"]:
-                for head_num in head_prize_numbers:
-                    matched_suffix = ""
-                    if award.prize_name == "二獎" and len(head_num) >= 7 and invoice_number[-7:] == head_num[-7:]:
-                        is_winning = True; winning_award = award; matched_suffix = head_num[-7:]
-                        winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後七碼: {matched_suffix}"}); break
-                    elif award.prize_name == "三獎" and len(head_num) >= 6 and invoice_number[-6:] == head_num[-6:]:
-                        is_winning = True; winning_award = award; matched_suffix = head_num[-6:]
-                        winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後六碼: {matched_suffix}"}); break
-                    elif award.prize_name == "四獎" and len(head_num) >= 5 and invoice_number[-5:] == head_num[-5:]:
-                        is_winning = True; winning_award = award; matched_suffix = head_num[-5:]
-                        winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後五碼: {matched_suffix}"}); break
-                    elif award.prize_name == "五獎" and len(head_num) >= 4 and invoice_number[-4:] == head_num[-4:]:
-                        is_winning = True; winning_award = award; matched_suffix = head_num[-4:]
-                        winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後四碼: {matched_suffix}"}); break
-                    elif award.prize_name == "六獎" and len(head_num) >= 3 and invoice_number[-3:] == head_num[-3:]:
-                        is_winning = True; winning_award = award; matched_suffix = head_num[-3:]
-                        winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後三碼: {matched_suffix}"}); break
-                if is_winning: break # 如果這個獎項已經中獎，就不用再比對其他號碼
-        if is_winning and award.prize_name in ["特別獎", "特獎", "頭獎"]: # 如果是大獎，中了就停止所有比對
-            break
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼: {winning_num_exact}"})
+                    break 
+            if is_winning: 
+                break
+
+        # 處理二獎、三獎、四獎、五獎、六獎，以及增開六獎
+        # 這些獎項都使用頭獎號碼的末幾碼進行比對
+        elif award.prize_name in ["二獎", "三獎", "四獎", "五獎", "六獎", "增開六獎"]:
+            for head_num_for_suffix in head_prize_numbers: 
+                print(f"--- 偵錯 ---", flush=True)
+                print(f"發票號碼: {invoice_number}", flush=True)
+                print(f"當前頭獎號碼 (完整): {head_num_for_suffix}", flush=True)
+                print(f"比對獎項: {award.prize_name}", flush=True) 
+
+                matched_suffix = ""
+                if award.prize_name == "二獎" and invoice_number[-7:] == head_num_for_suffix[-7:]:
+                    is_winning = True; winning_award = award; matched_suffix = head_num_for_suffix[-7:]
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後七碼: {matched_suffix}"}); break
+                elif award.prize_name == "三獎" and invoice_number[-6:] == head_num_for_suffix[-6:]:
+                    is_winning = True; winning_award = award; matched_suffix = head_num_for_suffix[-6:]
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後六碼: {matched_suffix}"}); break
+                elif award.prize_name == "四獎" and invoice_number[-5:] == head_num_for_suffix[-5:]:
+                    is_winning = True; winning_award = award; matched_suffix = head_num_for_suffix[-5:]
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後五碼: {matched_suffix}"}); break
+                elif award.prize_name == "五獎" and invoice_number[-4:] == head_num_for_suffix[-4:]:
+                    is_winning = True; winning_award = award; matched_suffix = head_num_for_suffix[-4:]
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後四碼: {matched_suffix}"}); break
+                elif award.prize_name == "六獎" and invoice_number[-3:] == head_num_for_suffix[-3:]:
+                    is_winning = True; winning_award = award; matched_suffix = head_num_for_suffix[-3:]
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後三碼: {matched_suffix}"}); break
+                elif award.prize_name == "增開六獎" and invoice_number[-3:] == head_num_for_suffix[-3:]:
+                    is_winning = True; winning_award = award; matched_suffix = head_num_for_suffix[-3:]
+                    winning_details.append({"prize": award.prize_name, "message": f"恭喜您，中了 {award.prize_name}！號碼後三碼: {matched_suffix}"}); break
+            if is_winning: 
+                break 
 
     try:
-        if is_winning: # 如果有中獎
-            highest_prize_detail = winning_details[0] # 獲取最高獎項的詳細信息
+        if is_winning: 
+            highest_prize_detail = winning_details[0]
 
             return jsonify({
                 "message": highest_prize_detail["message"],
                 "invoice_number": invoice_number,
                 "invoice_date": check_date.isoformat(),
-                "winning_status": True, # 直接設定為 True 因為中獎了
+                "winning_status": True, 
                 "award_details": {
                     "prize_name": highest_prize_detail["prize"],
-                    "winning_numbers": winning_award.winning_numbers # 顯示該獎項的完整號碼
-                } if winning_award else None # 確保 winning_award 存在才提供詳情
+                    "winning_numbers": winning_award.winning_numbers 
+                } if winning_award else None 
             }), 200
-        else: # 如果未中獎
+        else: 
             return jsonify({
-                "message": result_message, # 預設的「未中獎」訊息
+                "message": result_message, 
                 "invoice_number": invoice_number,
                 "invoice_date": check_date.isoformat(),
-                "winning_status": False, # 直接設定為 False 因為未中獎
-                "award_details": None # 未中獎則無獎項詳情
+                "winning_status": False, 
+                "award_details": None 
             }), 200
     except Exception as e:
-        print(f"對獎過程中發生錯誤: {e}", flush=True) # 打印錯誤到日誌
+        print(f"對獎過程中發生錯誤: {e}", flush=True) 
         return jsonify({"message": "檢核發票失敗，發生內部錯誤", "error": str(e)}), 500
     
-# --- 自動獲取開獎號碼 API (網頁爬蟲版本) (保持不變) ---
+# --- 自動獲取開獎號碼 API (網頁爬蟲版本) ---
 @app.route('/fetch_awards', methods=['POST'])
 def fetch_awards():
     """
@@ -403,8 +426,9 @@ def fetch_awards():
 
 # 將核心爬蟲和儲存邏輯抽離成一個獨立的函數
 def _execute_fetch_awards_logic():
-    invoice_web_url = "https://invoice.etax.nat.gov.tw/" 
+    invoice_web_url = "https://invoice.etax.nat.gov.tw/"
 
+    print("--- 開始從財政部網頁獲取開獎數據 ---", flush=True)
     try:
         response = requests.get(invoice_web_url)
         response.encoding = 'utf-8' # 強制設定編碼為 UTF-8
@@ -429,47 +453,59 @@ def _execute_fetch_awards_logic():
             raise Exception("解析開獎期別文本失敗，title屬性內容無效")
 
         actual_award_date = parse_award_date_from_period(period_text_raw)
+        print(f"解析到開獎日期: {actual_award_date.isoformat()}", flush=True)
         
         awards_to_save = []
+
+        # 用於暫存頭獎號碼，以便賦予二獎到六獎和增開六獎
+        current_head_prize_numbers = []
         
-        # **新的號碼提取邏輯：尋找所有 class 為 'text-center' 且 headers 為 'th01' 的 <td> 標籤作為獎項名稱**
-        # 然後獲取其後一個 <td> 內的 etw-tbiggest span
+        # 尋找所有 class 為 'text-center' 且 headers 為 'th01' 的 <td> 標籤作為獎項名稱
         prize_name_tds = soup.find_all('td', headers='th01', class_='text-center')
 
         for prize_name_td in prize_name_tds:
             prize_name = prize_name_td.get_text(strip=True)
+            winning_numbers = []
             
-            # 獲取下一個 td 元素，它應該包含中獎號碼
+            # 獲取下一個 td 元素，它應該包含中獎號碼或說明
             numbers_td = prize_name_td.find_next_sibling('td')
             
             if numbers_td:
-                winning_numbers = []
-                # 在這個 numbers_td 內部尋找所有的 etw-tbiggest span
-                num_elements = numbers_td.find_all(class_='etw-tbiggest')
+                # 針對 特別獎, 特獎, 頭獎 獲取實際號碼
+                if prize_name in ["特別獎", "特獎", "頭獎"]:
+                    num_elements = numbers_td.find_all(class_='etw-tbiggest')
+                    for elem in num_elements:
+                        num = elem.get_text(strip=True)
+                        if num:
+                            winning_numbers.append(num)
+                    # 如果是頭獎，額外保存號碼供後續獎項使用
+                    if prize_name == "頭獎":
+                        current_head_prize_numbers = winning_numbers
+                        print(f"--- 偵錯 --- 已獲取頭獎號碼: {current_head_prize_numbers}", flush=True)
 
-                for elem in num_elements:
-                    num = elem.get_text(strip=True)
-                    if num:
-                        winning_numbers.append(num)
-                
-                # 特殊處理：增開六獎
-                if prize_name == "增開六獎" and not winning_numbers:
-                    add_six_label = soup.find('a', string='增開六獎')
-                    if add_six_label:
-                        add_six_li = add_six_label.find_next('li') 
-                        if add_six_li:
-                            add_six_spans = add_six_li.find_all('span', class_='etw-tbiggest')
-                            for span in add_six_spans:
-                                num = span.get_text(strip=True)
-                                if num:
-                                    winning_numbers.append(num)
 
-                if winning_numbers:
-                    awards_to_save.append(Award(
-                        prize_name=prize_name,
-                        winning_numbers=",".join(winning_numbers),
-                        award_date=actual_award_date
-                    ))
+                # 處理二獎、三獎、四獎、五獎、六獎，以及【增開六獎】
+                # 這些獎項的中獎號碼實際上就是頭獎號碼
+                # 這樣 check_invoice 函數才能根據獎項名稱（例如六獎對末三碼）進行比對
+                elif prize_name in ["二獎", "三獎", "四獎", "五獎", "六獎", "增開六獎"]:
+                    if current_head_prize_numbers:
+                        # 將這些獎項的 winning_numbers 設置為當期所有頭獎號碼
+                        winning_numbers = current_head_prize_numbers
+                        print(f"--- 偵錯 --- {prize_name} 的號碼被設置為頭獎號碼: {winning_numbers}", flush=True)
+                    else:
+                        print(f"警告: 嘗試處理 {prize_name} 但未找到頭獎號碼，可能導致數據不完整。跳過此獎項。", flush=True)
+                        continue # 如果沒有頭獎號碼，跳過當前獎項
+
+            if winning_numbers:
+                awards_to_save.append(Award(
+                    prize_name=prize_name,
+                    winning_numbers=",".join(winning_numbers),
+                    award_date=actual_award_date
+                ))
+                print(f"已解析獎項: {prize_name}, 號碼: {','.join(winning_numbers)}", flush=True)
+            else:
+                print(f"警告: 未能為 {prize_name} 找到中獎號碼，跳過此獎項。", flush=True)
+
 
     except Exception as e:
         raise Exception(f"解析網頁內容失敗，請檢查網頁結構是否變更或聯繫開發者。錯誤: {str(e)}")
@@ -488,14 +524,19 @@ def _execute_fetch_awards_logic():
                 ).scalar_one_or_none()
 
                 if existing_award:
-                    existing_award.winning_numbers = new_award_entry.winning_numbers
-                    db.session.add(existing_award)
-                    print(f"更新現有獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}", flush=True)
+                    # 只有當號碼確實不同時才更新，避免不必要的資料庫操作
+                    if existing_award.winning_numbers != new_award_entry.winning_numbers:
+                        existing_award.winning_numbers = new_award_entry.winning_numbers
+                        db.session.add(existing_award) # 標記為需要更新
+                        print(f"更新現有獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}, 號碼: {new_award_entry.winning_numbers}", flush=True)
+                    else:
+                        print(f"獎項已存在且號碼相同，無需更新: {new_award_entry.prize_name} for {new_award_entry.award_date}", flush=True)
                 else:
                     db.session.add(new_award_entry)
-                    print(f"新增獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}", flush=True)
+                    print(f"新增獎項: {new_award_entry.prize_name} for {new_award_entry.award_date}, 號碼: {new_award_entry.winning_numbers}", flush=True)
 
             db.session.commit()
+            print("--- 開獎號碼已成功儲存至資料庫 ---", flush=True)
     except Exception as e:
         db.session.rollback()
         raise Exception(f"儲存開獎號碼失敗: {str(e)}")
