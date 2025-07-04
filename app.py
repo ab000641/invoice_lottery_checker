@@ -32,7 +32,6 @@ class Invoice(db.Model):
     id = Column(Integer, primary_key=True)
     invoice_number = Column(String(10), unique=True, nullable=False) # 發票號碼
     invoice_date = Column(Date, nullable=False) # 開獎日期 (購買發票的日期)
-    total_amount = Column(Integer, nullable=False) # 總金額
     winning_status = Column(Boolean, default=False) # 是否中獎
 
     # 關聯到 Award 模型
@@ -55,16 +54,6 @@ class Award(db.Model):
 
     def __repr__(self):
         return f"<Award {self.prize_name} for {self.award_date}>"
-
-class User(db.Model):
-    __tablename__ = 'users' # 資料表名稱
-    id = Column(Integer, primary_key=True)
-    username = Column(String(80), unique=True, nullable=False)
-    password_hash = Column(String(120), nullable=False) # 存放密碼的哈希值
-    email = Column(String(120), unique=True, nullable=False)
-
-    def __repr__(self):
-        return f"<User {self.username}>"
 
 # --- 應用程式路由 ---
 
@@ -115,7 +104,6 @@ def add_invoice():
     new_invoice = Invoice(
         invoice_number=data['invoice_number'],
         invoice_date=invoice_date,
-        total_amount=data['total_amount'],
         winning_status=False # 新增發票時預設為未中獎
     )
 
