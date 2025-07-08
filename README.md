@@ -8,12 +8,12 @@
 
 您是否曾為手動對獎統一發票感到繁瑣？
 
-「統一發票自動對獎系統」是一個基於 Flask 開發的應用程式，旨在簡化您的發票對獎流程。它能夠自動從財政部電子發票平台抓取最新的開獎號碼，並提供一個直觀的網頁介面，讓您輕鬆輸入發票資訊進行即時對獎。
+「**統一發票自動對獎系統**」是一個基於 Flask 開發的應用程式，旨在簡化您的發票對獎流程。它能夠自動從財政部電子發票平台抓取最新的開獎號碼，並提供一個直觀的網頁介面，讓您輕鬆輸入發票資訊進行即時對獎。
 
 <div align="center">
   輕鬆管理發票，智慧對獎，讓中獎不再錯過！<br><br>
   <img src="demo_image.png" alt="Demo 圖片" width="600"/><br>
-  </div>
+</div>
 
 ## 功能介紹
 
@@ -54,44 +54,47 @@
 - `Python` 版本：3.9 以上
 - `PostgreSQL` 版本：16.x (或 `16-alpine` 兼容版本)
 
-## Setup
+## 本地環境設定 (Setup)
 
 ---
 
-請依照以下步驟設定並運行您的應用程式：
+請依照以下步驟在您的本地機器上設定並運行應用程式：
 
-1.  **克隆專案儲存庫**：
+1.  **確保已安裝 Docker 和 Docker Compose**：
+    您的系統需要安裝 Docker 和 Docker Compose 來運行此專案。如果尚未安裝，請參考官方文件進行安裝：
+    * [Docker 官方安裝指南](https://docs.docker.com/get-docker/)
+
+2.  **克隆專案儲存庫**：
     ```bash
-    # 克隆專案到您的本地機器
     git clone [https://github.com/ab000641/invoice_lottery_checker.git](https://github.com/ab000641/invoice_lottery_checker.git)
-
-    # 進入專案資料夾
     cd invoice_lottery_checker
     ```
 
-2.  **建立 `.env` 環境變數檔案**：
-    在專案的根目錄下建立一個名為 `.env` 的檔案，並填入資料庫連線所需的環境變數。這些變數將被 `docker-compose.yml` 和 `app.py` 使用。
+3.  **建立 `.env` 環境變數檔案**：
+    在專案的根目錄下建立一個名為 `.env` 的檔案，並填入資料庫連線所需的環境變數。
     ```env
-    # .env 檔案內容範例
-    DB_NAME=mydatabase
-    DB_USER=myuser
-    DB_PASSWORD=mypassword
+    # .env 檔案內容範例 (請替換為您自己的值)
+    DB_NAME=mydatabase_dev
+    DB_USER=myuser_dev
+    DB_PASSWORD=mypassword_dev
     # DATABASE_URL 會由 docker-compose.yml 自動組裝
     ```
-    * 請將 `mydatabase`、`myuser` 和 `mypassword` 替換為您希望設定的資料庫名稱、使用者名稱和密碼。這些值將用於 Docker Compose 啟動的 PostgreSQL 容器。
+    * **提示**：這些變數將用於 Docker Compose 啟動的 PostgreSQL 容器，用於本地開發。
 
-3.  **使用 Docker Compose 啟動服務**：
-    在終端機中，執行以下命令來建置 Docker 映像檔並啟動所有服務。`--build` 選項會確保您的程式碼修改被包含在映像檔中。
+4.  **使用 Docker Compose 啟動服務**：
+    在專案根目錄的終端機中，執行以下命令來建置 Docker 映像檔並啟動所有服務。
     ```bash
     docker compose up --build -d
     ```
     這將會啟動 Flask 應用程式、PostgreSQL 資料庫和排程器服務。
 
-4.  **初始化資料庫 (如果資料庫是空的)**：
-    您的 `docker-compose.yml` 已經設定在 `web` 服務啟動時自動執行 `init_db()` 函數，這會在資料庫是空的時自動創建表格。因此，通常您無需手動執行額外的資料庫初始化步驟。
-    **重要提示**：在生產環境中，通常建議使用資料庫遷移工具（如 Alembic）來管理資料庫結構的變更。
+5.  **訪問應用程式**：
+    一旦服務啟動，您應該能夠在瀏覽器中訪問應用程式：
+    ```
+    http://localhost:5000
+    ```
 
-5.  **手動觸發首次開獎號碼抓取 (可選)**：
+6.  **手動觸發首次開獎號碼抓取 (可選)**：
     應用程式會自動排程每 12 小時抓取一次開獎號碼，但您也可以手動觸發立即抓取：
     ```bash
     curl -X POST http://localhost:5000/fetch_awards
